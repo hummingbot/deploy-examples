@@ -1,107 +1,98 @@
 #!/bin/bash
-# init
 
-echo
-echo
-echo "===============  CREATE A NEW HUMMINGBOT INSTANCE ==============="
-echo
-echo
-echo "ℹ️  Press [ENTER] for default values:"
-echo
+source $(dirname "${BASH_SOURCE[0]}")/../bash_scripts/folder-structure.sh
+source $(dirname "${BASH_SOURCE[0]}")/../bash_scripts/hummingbot-common.sh
 
-# Specify hummingbot version
-read -p "   Enter Hummingbot version you want to use [latest/development] (default = \"latest\") >>> " TAG
-if [ "$TAG" == "" ]
-then
-  TAG="latest"
-fi
+print_folder_structure() {
+  local instance_name=$1
+  local tag=$2
+  local folder=$3
 
-# Ask the user for the name of the new instance
-read -p "   Enter a name for your new Hummingbot instance (default = \"hummingbot\") >>> " INSTANCE_NAME
-if [ "$INSTANCE_NAME" == "" ]
-then
-  INSTANCE_NAME="hummingbot"
-  DEFAULT_FOLDER="hummingbot_files"
-else
-  DEFAULT_FOLDER="${INSTANCE_NAME}_files"
-fi
+  printf "%30s %5s\n" "Instance name:" "$instance_name"
+  printf "%30s %5s\n" "Version:" "hummingbot/hummingbot:$tag"
+  echo
+  printf "%30s %5s\n" "Main folder path:" "$folder"
+  for i in "${!SUB_FOLDERS[@]}"; do
+    printf "%30s %5s\n" "${SUB_FOLDER_NAMES[i]} files:" "├── $folder/${SUB_FOLDERS[i]}"
+  done
+}
 
-# Ask the user for the folder location to save files
-read -p "   Enter a folder name where your Hummingbot files will be saved (default = \"$DEFAULT_FOLDER\") >>> " FOLDER
-if [ "$FOLDER" == "" ]
-then
-  FOLDER=$PWD/$DEFAULT_FOLDER
-elif [[ ${FOLDER::1} != "/" ]]; then
-  FOLDER=$PWD/$FOLDER
-fi
-CONF_FOLDER="$FOLDER/conf"
-LOGS_FOLDER="$FOLDER/logs"
-DATA_FOLDER="$FOLDER/data"
-PMM_SCRIPTS_FOLDER="$FOLDER/pmm-scripts"
-SCRIPTS_FOLDER="$FOLDER/scripts"
-CERTS_FOLDER="$FOLDER/certs"
+# Create folder structure for your new instance
+create_folders() {
+  local folder="$1"
 
-echo
-echo "ℹ️  Confirm below if the instance and its folders are correct:"
-echo
-printf "%30s %5s\n" "Instance name:" "$INSTANCE_NAME"
-printf "%30s %5s\n" "Version:" "hummingbot/hummingbot:$TAG"
-echo
-printf "%30s %5s\n" "Main folder path:" "$FOLDER"
-printf "%30s %5s\n" "Config files:" "├── $CONF_FOLDER"
-printf "%30s %5s\n" "Log files:" "├── $LOGS_FOLDER"
-printf "%30s %5s\n" "Trade and data files:" "├── $DATA_FOLDER"
-printf "%30s %5s\n" "PMM scripts files:" "├── $PMM_SCRIPTS_FOLDER"
-printf "%30s %5s\n" "Scripts files:" "├── $SCRIPTS_FOLDER"
-printf "%30s %5s\n" "Cert files:" "├── $CERTS_FOLDER"
-echo
+  for sub_folder in "${SUB_FOLDERS[@]}"; do
+    mkdir -p "$folder/$sub_folder"
+  done
 
-prompt_proceed () {
- read -p "   Do you want to proceed? [Y/N] >>> " PROCEED
- if [ "$PROCEED" == "" ]
- then
- PROCEED="Y"
- fi
+  for sub_conf_extra in "${SUB_CONF_EXTRAS[@]}"; do
+    mkdir -p "$folder/conf/$sub_conf_extra"
+  done
 }
 
 # Execute docker commands
 create_instance () {
- echo
- echo "Creating Hummingbot instance ... Admin password may be required to set the required permissions ..."
- echo
- # 1) Create main folder for your new instance
- mkdir $FOLDER
- # 2) Create subfolders for hummingbot files
- mkdir $CONF_FOLDER
- mkdir $CONF_FOLDER/connectors
- mkdir $CONF_FOLDER/strategies
- mkdir $LOGS_FOLDER
- mkdir $DATA_FOLDER
- mkdir $PMM_SCRIPTS_FOLDER
- mkdir $CERTS_FOLDER
- mkdir $SCRIPTS_FOLDER
- # 3) Set required permissions to save hummingbot password the first time
- sudo chmod a+rw $CONF_FOLDER $CERTS_FOLDER
- # 4) Launch a new instance of hummingbot
- docker run -it --log-opt max-size=10m --log-opt max-file=5 \
- --name $INSTANCE_NAME \
- --network host \
- -v $CONF_FOLDER:/conf \
- -v $CONF_FOLDER/connectors:/conf/connectors \
- -v $CONF_FOLDER/strategies:/conf/strategies \
- -v $LOGS_FOLDER:/logs \
- -v $DATA_FOLDER:/data \
- -v $PMM_SCRIPTS_FOLDER:/pmm_scripts \
- -v $SCRIPTS_FOLDER:/scripts \
- -v $CERTS_FOLDER:/certs \
- hummingbot/hummingbot:$TAG
+  local instance_name="$1"
+  local tag="$2"
+  local folder="$3"
+
+  print_section_message "Creating Hummingbot instance ... Admin password may be required to set the required permissions ..."
+
+  # 1) Create folder structure for your new instance
+  create_folders "$folder"
+
+  # 2) Set required permissions to save hummingbot password the first time
+  set_rw_permissions "$folder"
+
+  # 3) Launch a new instance of hummingbot
+  local docker_volume_args=$(build_docker_volume_args "$folder")
+  run_docker "$instance_name" "$tag" "$docker_volume_args"
 }
 
-prompt_proceed
-if [[ "$PROCEED" == "Y" || "$PROCEED" == "y" ]]
-then
- create_instance
-else
- echo "   Aborted"
- echo
+main(){
+  # Main Execution
+  print_script_title "CREATE A NEW HUMMINGBOT INSTANCE"
+
+  # Specify hummingbot version
+  TAG=$(ask "   Enter Hummingbot version you want to use [latest/development] (default = \"latest\") >>> " "latest")
+
+  # Ask the user for the name of the new instance
+  INSTANCE_NAME=$(ask "   Enter a name for your new Hummingbot instance (default = \"hummingbot\") >>> " "hummingbot")
+  DEFAULT_FOLDER="${INSTANCE_NAME}_files"
+
+  # Ask the user for the folder location to save files
+  FOLDER=$(ask "   Enter a folder name where your Hummingbot files will be saved (default = \"$DEFAULT_FOLDER\") >>> " $DEFAULT_FOLDER)
+  [[ ${FOLDER::1} != "/" ]] && FOLDER=$PWD/$FOLDER
+
+  echo
+  print_info "Confirm below if the instance and its folders are correct:"
+  echo
+  print_folder_structure "$INSTANCE_NAME" "$TAG" "$FOLDER"
+  echo
+
+  PROCEED=$(ask "   Do you want to proceed? [Y/n] >>> " "Y")
+  if [[ "$PROCEED" == "Y" || "$PROCEED" == "y" ]]
+  then
+    create_instance "$INSTANCE_NAME" "$TAG" "$FOLDER"
+  else
+    echo "   Aborted"
+    echo
+  fi
+}
+
+### Main Execution ###
+
+# If sourced with --source-only flag, skip the rest of the script
+if [ "$1" == "--source-only" ]; then
+  return 0
 fi
+
+# If called with --test flag, run the specified test function
+if [ "$1" == "--test" ]; then
+  test_function=$2
+  $test_function "${@:3}"
+  exit 0
+fi
+
+# Otherwise, execute main()
+main "$@"
